@@ -112,6 +112,8 @@ def analyze(repo: str, output_json: bool):
 def generate(repo: str, platforms: tuple, dry_run: bool, branch: str):
     """Generate CI/CD workflows."""
     try:
+        from .generator import DependabotGenerator, PreCommitGenerator, WorkflowGenerator
+        
         analyzer = ProjectAnalyzer(repo)
         analysis = analyzer.analyze()
         
@@ -130,12 +132,81 @@ def generate(repo: str, platforms: tuple, dry_run: bool, branch: str):
         console.print(f"  Test Framework:  {analysis.test_framework}")
         console.print()
         
-        # TODO: Implement workflow generation
-        console.print("[yellow]⚠️  Workflow generation coming soon![/yellow]")
-        console.print("[dim]For now, use `analyze` to see detected stack[/dim]\n")
+        # Generate workflows
+        generator = WorkflowGenerator()
+        precommit_gen = PreCommitGenerator()
+        dependabot_gen = DependabotGenerator()
+        
+        all_workflows = {}
+        
+        for platform in target_platforms:
+            if platform == "github":
+                all_workflows.update(generator.generate_github_workflows(analysis))
+            elif platform == "gitlab":
+                all_workflows.update(generator.generate_gitlab_workflows(analysis))
+            elif platform == "jenkins":
+                all_workflows.update(generator.generate_jenkins_workflows(analysis))
+            elif platform == "buildkite":
+                all_workflows.update(generator.generate_buildkite_workflows(analysis))
+        
+        # Add pre-commit and dependabot (GitHub specific)
+        if "github" in target_platforms:
+            precommit_config = precommit_gen.generate_pre_commit_config(analysis)
+            if precommit_config:
+                all_workflows[".pre-commit-config.yaml"] = precommit_config
+            
+            dependabot_config = dependabot_gen.generate_dependabot_config(analysis)
+            if dependabot_config:
+                all_workflows[".github/dependabot.yml"] = dependabot_config
+        
+        if not all_workflows:
+            console.print("[yellow]No workflows generated for detected configuration[/yellow]\n")
+            return
+        
+        # Show summary
+        console.print(f"[green]✓ Generated {len(all_workflows)} configuration files:[/green]\n")
+        
+        for filepath in sorted(all_workflows.keys()):
+            console.print(f"  {filepath}")
+        
+        console.print()
+        
+        if dry_run:
+            console.print("[bold cyan]Preview (--dry-run mode):[/bold cyan]\n")
+            for filepath, content in sorted(all_workflows.items()):
+                console.print(f"\n{'='*60}")
+                console.print(f"File: [bold]{filepath}[/bold]")
+                console.print(f"{'='*60}\n")
+                
+                # Show syntax highlighted content
+                if filepath.endswith('.yml') or filepath.endswith('.yaml'):
+                    syntax = Syntax(content, "yaml", theme="monokai", line_numbers=False)
+                    console.print(syntax)
+                elif filepath.endswith('.groovy'):
+                    syntax = Syntax(content, "groovy", theme="monokai", line_numbers=False)
+                    console.print(syntax)
+                else:
+                    console.print(content)
+        else:
+            # Write files
+            repo_path = Path(repo)
+            
+            for filepath, content in all_workflows.items():
+                full_path = repo_path / filepath
+                full_path.parent.mkdir(parents=True, exist_ok=True)
+                full_path.write_text(content)
+            
+            console.print(f"[green]✓ Files written to {repo}[/green]")
+            console.print(f"\n[bold cyan]Next steps:[/bold cyan]")
+            console.print(f"  1. Review the generated files")
+            console.print(f"  2. Commit: git add {' '.join(all_workflows.keys())}")
+            console.print(f"  3. Push: git push -u origin {branch}")
+            console.print(f"  4. Create a pull request\n")
         
     except Exception as e:
+        import traceback
         console.print(f"[red]Error generating workflows: {e}[/red]", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
 
 

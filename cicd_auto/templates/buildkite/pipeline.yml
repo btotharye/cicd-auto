@@ -1,0 +1,146 @@
+steps:
+{%- if language == "python" %}
+  - label: ":python: Setup & Lint"
+    command:
+{%- if package_manager == "uv" %}
+      - pip install uv
+      - uv sync --all-extras
+      - uv run ruff check .
+      - uv run ruff format --check .
+      - uv run mypy .
+{%- elif package_manager == "poetry" %}
+      - pip install poetry
+      - poetry install --with dev
+      - poetry run ruff check .
+      - poetry run ruff format --check .
+      - poetry run mypy .
+{%- else %}
+      - python -m pip install --upgrade pip
+      - pip install -e ".[dev]"
+      - ruff check .
+      - ruff format --check .
+      - mypy .
+{%- endif %}
+    agents:
+      python: "{{ python_versions[0] }}"
+
+  - wait
+
+  - label: ":test_tube: Test"
+    parallelism: {{ python_versions | length }}
+    command:
+{%- if package_manager == "uv" %}
+      - pip install uv
+      - uv sync --all-extras
+      - uv run pytest --cov=. --cov-report=xml --cov-report=json
+{%- elif package_manager == "poetry" %}
+      - pip install poetry
+      - poetry install --with dev
+      - poetry run pytest --cov=. --cov-report=xml --cov-report=json
+{%- else %}
+      - python -m pip install --upgrade pip
+      - pip install -e ".[dev]"
+      - pytest --cov=. --cov-report=xml --cov-report=json
+{%- endif %}
+    parallelism: {{ python_versions | length }}
+    agents:
+      python: "{{ python_versions | join('") or python: ("') }}"
+    artifact_paths:
+      - coverage.xml
+      - coverage.json
+
+  - label: ":shield: Security Scan"
+    command:
+{%- if package_manager == "uv" %}
+      - pip install uv
+      - uv sync --all-extras
+      - uv run bandit -r . -ll -f json -o bandit-report.json || true
+{%- elif package_manager == "poetry" %}
+      - pip install poetry
+      - poetry install --with dev
+      - poetry run bandit -r . -ll -f json -o bandit-report.json || true
+{%- else %}
+      - pip install bandit
+      - bandit -r . -ll -f json -o bandit-report.json || true
+{%- endif %}
+    allow_dependency_failure: true
+
+{%- elif language == "node" %}
+  - label: ":node: Setup & Lint"
+    command:
+{%- if package_manager == "pnpm" %}
+      - npm install -g pnpm
+      - pnpm install --frozen-lockfile
+      - pnpm lint
+{%- elif package_manager == "yarn" %}
+      - npm install -g yarn
+      - yarn install --frozen-lockfile
+      - yarn lint
+{%- else %}
+      - npm ci
+      - npm run lint
+{%- endif %}
+
+  - wait
+
+  - label: ":test_tube: Test & Coverage"
+    command:
+{%- if package_manager == "pnpm" %}
+      - npm install -g pnpm
+      - pnpm install --frozen-lockfile
+      - pnpm test -- --coverage --json --outputFile=coverage/coverage.json
+{%- elif package_manager == "yarn" %}
+      - npm install -g yarn
+      - yarn install --frozen-lockfile
+      - yarn test --coverage --json --outputFile=coverage/coverage.json
+{%- else %}
+      - npm ci
+      - npm test -- --coverage --json --outputFile=coverage/coverage.json
+{%- endif %}
+    artifact_paths:
+      - coverage/**/*
+
+  - label: ":building_construction: Build"
+    command:
+{%- if package_manager == "pnpm" %}
+      - npm install -g pnpm
+      - pnpm install --frozen-lockfile
+      - pnpm build
+{%- elif package_manager == "yarn" %}
+      - npm install -g yarn
+      - yarn install --frozen-lockfile
+      - yarn build
+{%- else %}
+      - npm ci
+      - npm run build
+{%- endif %}
+    artifact_paths:
+      - dist/**/*
+
+{%- elif language == "go" %}
+  - label: ":go: Setup & Lint"
+    command:
+      - go mod download
+      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+      - golangci-lint run ./...
+      - go fmt -l .
+
+  - wait
+
+  - label: ":test_tube: Test"
+    command:
+      - go test -v -race -coverprofile=coverage.out ./...
+    artifact_paths:
+      - coverage.out
+
+  - label: ":building_construction: Build"
+    command:
+      - go build -o app .
+    artifact_paths:
+      - app
+
+{%- endif %}
+
+notify:
+  - email: "{{ notify_email }}"
+    if: build.state == "failed"

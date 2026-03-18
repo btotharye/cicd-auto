@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: {% raw %}${{ github.workflow }}-${{ github.ref }}{% endraw %}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["{{ python_versions | join('", "') }}"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: astral-sh/setup-uv@v1
+        with:
+          python-version: {% raw %}${{ matrix.python-version }}{% endraw %}
+
+{%- if package_manager == "uv" %}
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run mypy .
+
+      - name: Test
+        run: uv run pytest --cov=. --cov-report=xml --cov-report=term-missing
+
+{%- elif package_manager == "poetry" %}
+      - name: Cache Poetry virtualenvs
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pypoetry
+          key: {% raw %}${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}{% endraw %}
+          restore-keys: |
+            {% raw %}${{ runner.os }}-poetry-{% endraw %}
+
+      - name: Install dependencies
+        run: |
+          pip install poetry
+          poetry install --with dev
+
+      - name: Lint
+        run: poetry run ruff check .
+
+      - name: Format check
+        run: poetry run ruff format --check .
+
+      - name: Type check
+        run: poetry run mypy .
+
+      - name: Test
+        run: poetry run pytest --cov=. --cov-report=xml --cov-report=term-missing
+
+{%- else %}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Format check
+        run: ruff format --check .
+
+      - name: Type check
+        run: mypy .
+
+      - name: Test
+        run: pytest --cov=. --cov-report=xml --cov-report=term-missing
+
+{%- endif %}
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v1
+
+      - name: Security check (bandit)
+        run: uv run bandit -r . -ll 2>/dev/null || true
+
+      - name: Dependency check
+        run: uv run pip-audit --desc || true
