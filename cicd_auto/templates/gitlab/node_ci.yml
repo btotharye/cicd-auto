@@ -1,0 +1,130 @@
+stages:
+  - lint
+  - test
+  - build
+  - security
+
+variables:
+  NODE_ENV: test
+
+cache:
+  key: {% raw %}${CI_COMMIT_REF_SLUG}{% endraw %}
+  paths:
+    - node_modules/
+    - .pnpm-store/
+    - .yarn/cache/
+
+lint:
+  image: node:{{ node_versions[0] }}
+  stage: lint
+{%- if package_manager == "pnpm" %}
+  before_script:
+    - npm install -g pnpm
+    - pnpm install --frozen-lockfile
+  script:
+    - pnpm lint
+    - pnpm type-check || true
+{%- elif package_manager == "yarn" %}
+  before_script:
+    - npm install -g yarn
+    - yarn install --frozen-lockfile
+  script:
+    - yarn lint
+    - yarn type-check || true
+{%- else %}
+  before_script:
+    - npm ci
+  script:
+    - npm run lint
+    - npm run type-check || true
+{%- endif %}
+  allow_failure: false
+
+test:
+  image: node:{% raw %}${NODE_VERSION}{% endraw %}
+  stage: test
+  parallel:
+    matrix:
+      - NODE_VERSION: {{ node_versions | join(', ') }}
+{%- if package_manager == "pnpm" %}
+  before_script:
+    - npm install -g pnpm
+    - pnpm install --frozen-lockfile
+  script:
+    - pnpm test -- --coverage
+  coverage: '/All files\s+\|.*?\s+(\d+\.?\d*)/'
+{%- elif package_manager == "yarn" %}
+  before_script:
+    - npm install -g yarn
+    - yarn install --frozen-lockfile
+  script:
+    - yarn test --coverage
+  coverage: '/All files\s+\|.*?\s+(\d+\.?\d*)/'
+{%- else %}
+  before_script:
+    - npm ci
+  script:
+    - npm test -- --coverage
+  coverage: '/All files\s+\|.*?\s+(\d+\.?\d*)/'
+{%- endif %}
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura-coverage.xml
+    paths:
+      - coverage/
+    expire_in: 30 days
+
+build:
+  image: node:{{ node_versions[0] }}
+  stage: build
+  needs: ["test"]
+{%- if package_manager == "pnpm" %}
+  before_script:
+    - npm install -g pnpm
+    - pnpm install --frozen-lockfile
+  script:
+    - pnpm build
+{%- elif package_manager == "yarn" %}
+  before_script:
+    - npm install -g yarn
+    - yarn install --frozen-lockfile
+  script:
+    - yarn build
+{%- else %}
+  before_script:
+    - npm ci
+  script:
+    - npm run build
+{%- endif %}
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 30 days
+  only:
+    - main
+    - develop
+
+security:
+  image: node:{{ node_versions[0] }}
+  stage: security
+{%- if package_manager == "pnpm" %}
+  before_script:
+    - npm install -g pnpm
+    - pnpm install --frozen-lockfile
+  script:
+    - pnpm audit --audit-level moderate || true
+{%- elif package_manager == "yarn" %}
+  before_script:
+    - npm install -g yarn
+    - yarn install --frozen-lockfile
+  script:
+    - yarn audit --level moderate || true
+{%- else %}
+  before_script:
+    - npm ci
+  script:
+    - npm audit --audit-level moderate || true
+{%- endif %}
+  allow_failure: true

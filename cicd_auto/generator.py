@@ -88,11 +88,15 @@ class WorkflowGenerator:
         template_path = self.templates_dir / template_name
 
         if not template_path.exists():
+            # Some languages might not have CD templates
             return None
 
-        context = self._build_context(analysis)
-        template = self.env.get_template(template_name)
-        return template.render(**context)
+        try:
+            context = self._build_context(analysis)
+            template = self.env.get_template(template_name)
+            return template.render(**context)
+        except Exception:
+            return None
 
     def _generate_gitlab_ci(self, analysis: ProjectAnalysis) -> Optional[str]:
         """Generate GitLab CI workflow."""

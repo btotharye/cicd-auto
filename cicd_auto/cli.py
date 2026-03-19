@@ -27,6 +27,8 @@ def main():
 def analyze(repo: str, output_json: bool):
     """Analyze a repository and show detected stack."""
     try:
+        import json as json_module
+        
         analyzer = ProjectAnalyzer(repo)
         analysis = analyzer.analyze()
         
@@ -47,7 +49,7 @@ def analyze(repo: str, output_json: bool):
                 "build_command": analysis.build_command,
                 "python_version": analysis.python_version,
             }
-            click.echo(json.dumps(output, indent=2))
+            click.echo(json_module.dumps(output, indent=2))
             return
         
         # Pretty output

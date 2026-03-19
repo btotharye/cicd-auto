@@ -1,0 +1,90 @@
+stages:
+  - lint
+  - test
+  - build
+  - security
+
+variables:
+  GO111MODULE: "on"
+
+lint:
+  image: golang:{{ go_versions[0] }}-alpine
+  stage: lint
+  before_script:
+    - apk add --no-cache git
+    - go mod download
+    - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+  script:
+    - golangci-lint run ./...
+    - go fmt ./...
+  allow_failure: false
+
+test:
+  image: golang:{% raw %}${GO_VERSION}{% endraw %}-alpine
+  stage: test
+  parallel:
+    matrix:
+      - GO_VERSION: {{ go_versions | join(', ') }}
+  before_script:
+    - apk add --no-cache git
+    - go mod download
+  script:
+    - go test -v -race -coverprofile=coverage.out ./...
+    - go tool cover -html coverage.out -o coverage.html
+  coverage: '/coverage:\s+([\d.]+)%/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.out
+    paths:
+      - coverage.html
+    expire_in: 30 days
+
+build:
+  image: golang:{{ go_versions[0] }}-alpine
+  stage: build
+  needs: ["test"]
+  before_script:
+    - apk add --no-cache git
+    - go mod download
+  script:
+    - go build -o app .
+    - go build -o app-linux-arm64 -v -ldflags="-s -w" .
+  artifacts:
+    paths:
+      - app
+      - app-linux-arm64
+    expire_in: 30 days
+
+cross-build:
+  image: golang:{{ go_versions[0] }}-alpine
+  stage: build
+  needs: ["test"]
+  before_script:
+    - apk add --no-cache git
+    - go mod download
+  script:
+    - GOOS=linux GOARCH=amd64 go build -o app-linux-amd64 .
+    - GOOS=linux GOARCH=arm64 go build -o app-linux-arm64 .
+    - GOOS=darwin GOARCH=amd64 go build -o app-darwin-amd64 .
+    - GOOS=darwin GOARCH=arm64 go build -o app-darwin-arm64 .
+    - GOOS=windows GOARCH=amd64 go build -o app-windows-amd64.exe .
+  artifacts:
+    paths:
+      - app-*
+    expire_in: 30 days
+  only:
+    - tags
+    - main
+
+security:
+  image: golang:{{ go_versions[0] }}-alpine
+  stage: security
+  before_script:
+    - apk add --no-cache git
+    - go mod download
+    - go install github.com/securego/gosec/v2/cmd/gosec@latest
+  script:
+    - gosec ./... || true
+  allow_failure: true
